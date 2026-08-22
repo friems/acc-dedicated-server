@@ -1,6 +1,13 @@
 services:
   acc-server:
-    build: .
+    build:
+      context: .
+      # Only consulted if you actually build locally (`docker compose build`
+      # / `up --build`) - see README for creating these files. Irrelevant if
+      # you just `docker compose pull` the GHCR image below.
+      secrets:
+        - steam_user
+        - steam_password
     image: ghcr.io/friems/acc-dedicated-server:latest
     container_name: acc-server
     restart: unless-stopped
@@ -34,3 +41,9 @@ services:
       WEATHER_RANDOMNESS: ${WEATHER_RANDOMNESS:-1}
     volumes:
       - ${DATA_PATH:?set DATA_PATH to a real host path before starting this stack - see README}:/data
+
+secrets:
+  steam_user:
+    file: ./secrets/steam_user.txt
+  steam_password:
+    file: ./secrets/steam_password.txt

@@ -9,9 +9,13 @@ rules - without touching JSON by hand.
 ## How it's put together
 
 - `Dockerfile` - Ubuntu 22.04 + Wine (WineHQ stable, 64-bit) + SteamCMD.
-  At build time, SteamCMD anonymously downloads the ACC dedicated server
-  (Steam app id `1430110`, Windows depot) - no Steam account or game
-  ownership needed.
+  At build time, SteamCMD downloads the ACC dedicated server (Steam app
+  id `1430110`, Windows depot). Anonymous SteamCMD login does **not**
+  work for this specific app (confirmed - it fails with "Missing
+  configuration"; even Kunos requires a real, if free, account for it),
+  so the build needs Steam credentials for a real account - see
+  "Steam account for the build" below. Credentials are passed as Docker
+  BuildKit secrets, never baked into an image layer.
 - `app/` - a small Flask app (served via waitress) that is the only thing
   that runs in the foreground. It reads/writes ACC's `cfg/*.json` files
   (UTF-16LE + BOM, as ACC requires) and starts/stops `wine accServer.exe`
@@ -22,6 +26,36 @@ rules - without touching JSON by hand.
 - Everything persistent (`cfg/`, `results/`, `logs/`) lives in `/data`,
   which is symlinked into the server's install directory so the dashboard
   and the game server are always looking at the same files.
+
+## Steam account for the build
+
+Building the image (either locally or via GitHub Actions) needs a real
+Steam account to download the ACC dedicated server - a free, disposable
+one is fine, it never needs to own or launch anything. Create one at
+store.steampowered.com, then go to **Account Details > Manage Steam
+Guard account security > Steam Guard is turned off**. This has to be
+fully off (not just the mobile authenticator) or the headless/CI login
+will get stuck waiting on a 2FA code nobody can answer.
+
+**For GitHub Actions**: add the credentials as repo secrets so the
+workflow can use them - go to your repo's **Settings > Secrets and
+variables > Actions > New repository secret** and add:
+- `STEAM_USER` - the account's username
+- `STEAM_PASSWORD` - the account's password
+
+Don't paste these into chat with me or commit them anywhere - the whole
+point of BuildKit secrets is that they only ever live in GitHub's secret
+store and the ephemeral build container.
+
+**For a local/SSH build** (see the QNAP section's "if you'd rather not
+use GitHub Actions" note), create two small files instead - they're
+already covered by `.gitignore`:
+```
+mkdir -p secrets
+echo -n "your-steam-username" > secrets/steam_user.txt
+echo -n "your-steam-password" > secrets/steam_password.txt
+docker compose build
+```
 
 ## First-time setup (Linux host, Docker CLI)
 
@@ -35,7 +69,9 @@ rules - without touching JSON by hand.
    ports, weather, ...) only seed the config the very first time the
    server starts (empty volume) - after that, use the dashboard.
 
-2. Create the directory you chose for `DATA_PATH`, then build and start:
+2. Create `secrets/steam_user.txt` and `secrets/steam_password.txt` (see
+   "Steam account for the build" above), and the directory you chose for
+   `DATA_PATH`, then build and start:
    ```
    mkdir -p /path/to/your/data-dir   # whatever you set DATA_PATH to
    docker compose up -d --build
@@ -110,10 +146,16 @@ QNAP models, keep an eye on CPU load once players connect.
 ### If you'd rather not use GitHub Actions
 
 Everything above also still works the old way - SSH into the NAS, `git
-clone` this repo (or copy the files over), and `docker build -t
-acc-dedicated-server:latest .` once locally, then point
-`docker-compose.yml`'s `image:` at that local tag instead of the GHCR
-one before pasting it into Container Station.
+clone` this repo (or copy the files over), create `secrets/steam_user.txt`
+and `secrets/steam_password.txt` (see "Steam account for the build"
+above), then:
+```
+docker build --secret id=steam_user,src=secrets/steam_user.txt \
+             --secret id=steam_password,src=secrets/steam_password.txt \
+             -t acc-dedicated-server:latest .
+```
+and point `docker-compose.yml`'s `image:` at that local tag instead of
+the GHCR one before pasting it into Container Station.
 
 ## Changing settings
 

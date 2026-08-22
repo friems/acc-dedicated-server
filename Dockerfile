@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -36,14 +37,22 @@ RUN mkdir -p ${STEAMCMDDIR} && \
         | tar zxvf - -C ${STEAMCMDDIR}
 
 # --- ACC dedicated server (Steam app 1430110) --------------------------------
-# The dedicated server is a Windows-only depot; anonymous login works (no
-# Steam account/ownership of the game is required), but the platform must be
+# The dedicated server is a Windows-only depot, so the platform must be
 # forced to windows since the container's native platform is linux.
-RUN mkdir -p ${ACC_INSTALL_DIR} && \
+#
+# Anonymous SteamCMD login does NOT work for this app (confirmed: it fails
+# with "Missing configuration", and CubeCoders' AMP template for this game
+# explicitly sets SteamUpdateAnonymousLogin=False) - it needs a real Steam
+# account, though a free/disposable one with Steam Guard disabled is fine.
+# Credentials are passed as BuildKit secrets so they never land in an image
+# layer or in `docker history`.
+RUN --mount=type=secret,id=steam_user,required=true \
+    --mount=type=secret,id=steam_password,required=true \
+    mkdir -p ${ACC_INSTALL_DIR} && \
     ${STEAMCMDDIR}/steamcmd.sh \
         +@sSteamCmdForcePlatformType windows \
         +force_install_dir ${ACC_INSTALL_DIR} \
-        +login anonymous \
+        +login "$(cat /run/secrets/steam_user)" "$(cat /run/secrets/steam_password)" \
         +app_update 1430110 validate \
         +quit
 
