@@ -1,0 +1,36 @@
+services:
+  acc-server:
+    build: .
+    image: ghcr.io/friems/acc-dedicated-server:latest
+    container_name: acc-server
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-8080}:8080"
+      - "${TCP_PORT:-9231}:${TCP_PORT:-9231}/tcp"
+      - "${UDP_PORT:-9231}:${UDP_PORT:-9231}/udp"
+    environment:
+      # dashboard login
+      DASHBOARD_USER: ${DASHBOARD_USER:-admin}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-changeme}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-please-change-this-secret}
+      AUTO_START: ${AUTO_START:-true}
+
+      # seeds cfg/*.json ONLY the first time the volume is empty - after
+      # that, edit everything from the dashboard instead.
+      SERVER_NAME: ${SERVER_NAME:-My ACC Server}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme_admin}
+      SERVER_PASSWORD: ${SERVER_PASSWORD:-}
+      SPECTATOR_PASSWORD: ${SPECTATOR_PASSWORD:-}
+      CAR_GROUP: ${CAR_GROUP:-FreeForAll}
+      MAX_CAR_SLOTS: ${MAX_CAR_SLOTS:-26}
+      MAX_CONNECTIONS: ${MAX_CONNECTIONS:-30}
+      TCP_PORT: ${TCP_PORT:-9231}
+      UDP_PORT: ${UDP_PORT:-9231}
+      REGISTER_TO_LOBBY: ${REGISTER_TO_LOBBY:-true}
+      TRACK: ${TRACK:-monza}
+      AMBIENT_TEMP: ${AMBIENT_TEMP:-22}
+      CLOUD_LEVEL: ${CLOUD_LEVEL:-0.3}
+      RAIN: ${RAIN:-0.0}
+      WEATHER_RANDOMNESS: ${WEATHER_RANDOMNESS:-1}
+    volumes:
+      - ${DATA_PATH:?set DATA_PATH to a real host path before starting this stack - see README}:/data

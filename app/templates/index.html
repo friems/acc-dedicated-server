@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}ACC Server Dashboard{% endblock %}
+{% block body %}
+<header class="topbar">
+  <h1>ACC Dedicated Server</h1>
+  <a class="link" href="{{ url_for('logout') }}">Sign out</a>
+</header>
+
+<section class="panel status-panel">
+  <div class="status-row">
+    <span id="status-badge" class="badge {{ 'up' if status.running else 'down' }}">
+      {{ 'RUNNING' if status.running else 'STOPPED' }}
+    </span>
+    <span id="status-pid" class="pid">{{ 'pid ' + status.pid|string if status.pid else '' }}</span>
+    <div class="controls">
+      <form method="post" action="{{ url_for('control', action='start') }}"><button {{ 'disabled' if status.running }}>Start</button></form>
+      <form method="post" action="{{ url_for('control', action='restart') }}"><button>Restart</button></form>
+      <form method="post" action="{{ url_for('control', action='stop') }}"><button class="danger" {{ 'disabled' if not status.running }}>Stop</button></form>
+    </div>
+  </div>
+  <pre id="log-view" class="log-view"></pre>
+</section>
+
+<form class="panel settings-form" method="post" action="{{ url_for('save') }}">
+  {% for section, fields in sections.items() %}
+  <fieldset>
+    <legend>{{ section }}</legend>
+    {% for f in fields %}
+    <label class="field {{ 'checkbox-field' if f.type == 'checkbox' }}">
+      <span>{{ f.label }}</span>
+      {% if f.type == 'select' %}
+        <select name="{{ f.id }}">
+          {% for opt in f.options %}
+          <option value="{{ opt }}" {{ 'selected' if opt == f.value }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      {% elif f.type == 'checkbox' %}
+        <input type="checkbox" name="{{ f.id }}" {{ 'checked' if f.value }}>
+      {% elif f.type == 'number' %}
+        <input type="number" name="{{ f.id }}" value="{{ f.value }}" min="{{ f.min }}" max="{{ f.max }}" step="1">
+      {% elif f.type == 'float' %}
+        <input type="number" name="{{ f.id }}" value="{{ f.value }}" min="{{ f.min }}" max="{{ f.max }}" step="{{ f.step }}">
+      {% elif f.type == 'password' %}
+        <input type="password" name="{{ f.id }}" value="{{ f.value }}" autocomplete="new-password">
+      {% else %}
+        <input type="text" name="{{ f.id }}" value="{{ f.value }}">
+      {% endif %}
+      {% if f.help %}<small>{{ f.help }}</small>{% endif %}
+    </label>
+    {% endfor %}
+  </fieldset>
+  {% endfor %}
+
+  <fieldset>
+    <legend>Sessions</legend>
+    <table class="sessions-table">
+      <thead><tr><th></th><th>Type</th><th>Duration (min)</th><th>Hour of day</th><th>Day (1=Fri..3=Sun)</th><th>Time multiplier</th></tr></thead>
+      <tbody>
+      {% for code, label in session_types.items() %}
+        {% set s = sessions_by_type.get(code, {}) %}
+        <tr>
+          <td><input type="checkbox" name="session.{{ code }}.enabled" {{ 'checked' if code in sessions_by_type }}></td>
+          <td>{{ label }}</td>
+          <td><input type="number" name="session.{{ code }}.sessionDurationMinutes" value="{{ s.get('sessionDurationMinutes', 20) }}" min="1" max="600"></td>
+          <td><input type="number" name="session.{{ code }}.hourOfDay" value="{{ s.get('hourOfDay', 12) }}" min="0" max="23"></td>
+          <td><input type="number" name="session.{{ code }}.dayOfWeekend" value="{{ s.get('dayOfWeekend', 1) }}" min="1" max="3"></td>
+          <td><input type="number" name="session.{{ code }}.timeMultiplier" value="{{ s.get('timeMultiplier', 1) }}" min="0" max="24"></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <small>At least Practice or Qualifying must stay enabled. Changes apply on the server's next restart.</small>
+  </fieldset>
+
+  <div class="save-row">
+    <button type="submit" class="primary">Save settings</button>
+  </div>
+</form>
+
+<script>
+async function poll() {
+  try {
+    const [statusRes, logRes] = await Promise.all([
+      fetch("{{ url_for('api_status') }}"),
+      fetch("{{ url_for('api_log') }}"),
+    ]);
+    const status = await statusRes.json();
+    const badge = document.getElementById("status-badge");
+    badge.textContent = status.running ? "RUNNING" : "STOPPED";
+    badge.className = "badge " + (status.running ? "up" : "down");
+    document.getElementById("status-pid").textContent = status.pid ? ("pid " + status.pid) : "";
+
+    const logData = await logRes.json();
+    const logView = document.getElementById("log-view");
+    const atBottom = logView.scrollTop + logView.clientHeight >= logView.scrollHeight - 10;
+    logView.textContent = logData.log;
+    if (atBottom) logView.scrollTop = logView.scrollHeight;
+  } catch (e) { /* server may be mid-restart, ignore */ }
+}
+poll();
+setInterval(poll, 3000);
+</script>
+{% endblock %}

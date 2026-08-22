@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Sign in - ACC Server{% endblock %}
+{% block body %}
+<div class="login-wrap">
+  <form class="login-card" method="post">
+    <h1>ACC Server</h1>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <label>Username<input type="text" name="username" autofocus required></label>
+    <label>Password<input type="password" name="password" required></label>
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+{% endblock %}
