@@ -8,54 +8,53 @@ rules - without touching JSON by hand.
 
 ## How it's put together
 
-- `Dockerfile` - Ubuntu 22.04 + Wine (WineHQ stable, 64-bit) + SteamCMD.
-  At build time, SteamCMD downloads the ACC dedicated server (Steam app
-  id `1430110`, Windows depot). Anonymous SteamCMD login does **not**
-  work for this specific app (confirmed - it fails with "Missing
-  configuration"; even Kunos requires a real, if free, account for it),
-  so the build needs Steam credentials for a real account - see
-  "Steam account for the build" below. Credentials are passed as Docker
-  BuildKit secrets, never baked into an image layer.
+- `Dockerfile` - Ubuntu 22.04 + Wine (WineHQ stable, 64-bit) + the
+  SteamCMD tool itself. It does **not** download the ACC server or need
+  any Steam credentials at build time - see below for why.
 - `app/` - a small Flask app (served via waitress) that is the only thing
   that runs in the foreground. It reads/writes ACC's `cfg/*.json` files
   (UTF-16LE + BOM, as ACC requires) and starts/stops `wine accServer.exe`
   as a child process.
-- `entrypoint.sh` - on container start: ensures `/data/cfg` has default
-  config (only if missing), optionally auto-starts the game server, then
-  starts the dashboard.
-- Everything persistent (`cfg/`, `results/`, `logs/`) lives in `/data`,
-  which is symlinked into the server's install directory so the dashboard
-  and the game server are always looking at the same files.
+- `entrypoint.sh` - on container start: downloads the ACC dedicated
+  server via SteamCMD into `/data/accserver` if it isn't there yet,
+  ensures `/data/cfg` has default config (only if missing), optionally
+  auto-starts the game server, then starts the dashboard.
+- Everything persistent - `cfg/`, `results/`, `logs/`, the ACC server
+  install itself, and SteamCMD's login session - lives in `/data`. That
+  last part matters: it's what makes the one-time Steam login below a
+  true one-time thing instead of something you redo on every rebuild.
 
-## Steam account for the build
+## Steam account (needed to download the server)
 
-Building the image (either locally or via GitHub Actions) needs a real
-Steam account to download the ACC dedicated server - a free, disposable
-one is fine, it never needs to own or launch anything. Create one at
-store.steampowered.com, then go to **Account Details > Manage Steam
-Guard account security > Steam Guard is turned off**. This has to be
-fully off (not just the mobile authenticator) or the headless/CI login
-will get stuck waiting on a 2FA code nobody can answer.
+Downloading the ACC dedicated server needs a real Steam account - a
+free, disposable one is fine, it never needs to own or launch anything.
+Anonymous SteamCMD login does **not** work for this specific app
+(confirmed - it fails with "Missing configuration"; CubeCoders' AMP
+template for this game explicitly sets `SteamUpdateAnonymousLogin=False`
+too). Create one at store.steampowered.com, then go to **Account
+Details > Manage Steam Guard account security > Steam Guard is turned
+off** (fully off, not just the mobile authenticator - otherwise routine
+logins would keep demanding a 2FA code).
 
-**For GitHub Actions**: add the credentials as repo secrets so the
-workflow can use them - go to your repo's **Settings > Secrets and
-variables > Actions > New repository secret** and add:
-- `STEAM_USER` - the account's username
-- `STEAM_PASSWORD` - the account's password
+Set `STEAM_USER` / `STEAM_PASSWORD` wherever you set the rest of this
+project's settings (`.env`, or directly in the pasted YAML for the QNAP
+GUI) - there's no default, it's required.
 
-Don't paste these into chat with me or commit them anywhere - the whole
-point of BuildKit secrets is that they only ever live in GitHub's secret
-store and the ephemeral build container.
-
-**For a local/SSH build** (see the QNAP section's "if you'd rather not
-use GitHub Actions" note), create two small files instead - they're
-already covered by `.gitignore`:
+**Even with Steam Guard off, the very first login from a brand-new
+"device" (i.e. this container, the first time it ever runs) still gets a
+one-time email verification code from Steam** - this is a base Valve
+security check, separate from the Guard toggle, and there is no way to
+script around it. So the first time only, you run the download as an
+interactive step so you can see the prompt and type the code:
 ```
-mkdir -p secrets
-echo -n "your-steam-username" > secrets/steam_user.txt
-echo -n "your-steam-password" > secrets/steam_password.txt
-docker compose build
+docker compose run --rm -it acc-server download-server
 ```
+If Steam emails a code, paste it in when steamcmd asks. That session is
+then cached under `/data/.steam_home` (on your persistent volume), so
+every normal start after that - `docker compose up -d`, a NAS reboot, a
+Container Station restart - just works with no further prompts.
+Don't paste your Steam credentials into chat with me - they only belong
+in your own `.env`/deployment config.
 
 ## First-time setup (Linux host, Docker CLI)
 
@@ -63,21 +62,25 @@ docker compose build
    ```
    cp env.example .env
    ```
-   At minimum, set `DATA_PATH` (there's no default, on purpose - see
-   below) and change `DASHBOARD_PASSWORD`, `ADMIN_PASSWORD`, and
-   `FLASK_SECRET_KEY`. The rest (`SERVER_NAME`, `TRACK`, `CAR_GROUP`,
-   ports, weather, ...) only seed the config the very first time the
-   server starts (empty volume) - after that, use the dashboard.
+   At minimum, set `DATA_PATH`, `STEAM_USER`, and `STEAM_PASSWORD`
+   (none have defaults, on purpose - see above), and change
+   `DASHBOARD_PASSWORD`, `ADMIN_PASSWORD`, and `FLASK_SECRET_KEY`. The
+   rest (`SERVER_NAME`, `TRACK`, `CAR_GROUP`, ports, weather, ...) only
+   seed the config the very first time the server starts (empty volume)
+   - after that, use the dashboard.
 
-2. Create `secrets/steam_user.txt` and `secrets/steam_password.txt` (see
-   "Steam account for the build" above), and the directory you chose for
-   `DATA_PATH`, then build and start:
+2. Create the directory you chose for `DATA_PATH`, build, and do the
+   one-time interactive download:
    ```
    mkdir -p /path/to/your/data-dir   # whatever you set DATA_PATH to
-   docker compose up -d --build
+   docker compose build
+   docker compose run --rm -it acc-server download-server
    ```
-   The first build takes a while (installs Wine + downloads the ~1GB+
-   server via SteamCMD).
+   Watch for a Steam Guard code prompt (see "Steam account" above) and
+   enter it if asked. Once that finishes successfully:
+   ```
+   docker compose up -d
+   ```
 
 3. Open the dashboard at `http://<host>:8080` (default port, see
    `DASHBOARD_PORT` in `.env`) and log in with `DASHBOARD_USER`/
@@ -120,22 +123,46 @@ it directly. No SSH, no local build, on the NAS at all.
    - `${DATA_PATH:?...}` - required, no default. Replace the whole
      `${DATA_PATH:?...}` expression with the literal path you created in
      step 2, e.g. `/share/Container/acc-server`.
+   - `${STEAM_USER:?...}` / `${STEAM_PASSWORD:?...}` - required, no
+     default. Replace with your disposable Steam account's credentials
+     (see "Steam account" above).
    - `DASHBOARD_PASSWORD`, `ADMIN_PASSWORD`, `FLASK_SECRET_KEY` - replace
      e.g. `${DASHBOARD_PASSWORD:-changeme}` with
      `${DASHBOARD_PASSWORD:-YourRealPassword}`, or just the literal
      value.
 
-4. Start the application from Container Station, then open
+4. Start the application from Container Station. On this first start,
+   `entrypoint.sh` will try the ACC server download and - almost
+   certainly - fail, because Container Station starts it non-interactively
+   and the very first Steam login needs that one-time interactive Guard
+   code (see "Steam account" above). That's expected; the dashboard will
+   still come up. Now do the one-time interactive step: over SSH,
+   ```
+   docker exec -it acc-server /entrypoint.sh download-server
+   ```
+   (or check whether your Container Station version has a per-container
+   **Terminal/Console** tab in the container's detail view - if so, you
+   can run that same command from there instead of SSH). Enter the Guard
+   code if Steam emails you one.
+
+5. Once that succeeds, restart the application from Container Station so
+   `entrypoint.sh` finds the now-downloaded server and starts it. Open
    `http://<nas-ip>:8080`, log in, and check the log panel to confirm
    `accServer.exe` actually came up under Wine.
 
-5. Forward TCP+UDP `9231` (or whatever you set) on your router, pointing
+6. Forward TCP+UDP `9231` (or whatever you set) on your router, pointing
    at the NAS's IP.
 
-**Updating the server later**: push a commit (or re-run the workflow
-manually from the Actions tab), wait for it to publish a new `:latest`,
-then in Container Station either restart the application (if it's set to
-always pull) or remove/recreate it to force a fresh pull.
+**Updating the dashboard/image later**: push a commit (or re-run the
+workflow manually from the Actions tab), wait for it to publish a new
+`:latest`, then in Container Station either restart the application (if
+it's set to always pull) or remove/recreate it to force a fresh pull -
+your `/data` (config, Steam login, the ACC server itself) is untouched
+either way. **Updating the ACC server version itself** needs its
+contents refreshed: delete `<DATA_PATH>/accserver`'s contents via File
+Station, then repeat the interactive `download-server` step above (no
+new Guard code needed - that session is still cached in
+`<DATA_PATH>/.steam_home`).
 
 **Resource note**: ACC's dedicated server itself is lightweight (it's a
 headless simulation, not rendering anything), so a small/private server
@@ -146,16 +173,13 @@ QNAP models, keep an eye on CPU load once players connect.
 ### If you'd rather not use GitHub Actions
 
 Everything above also still works the old way - SSH into the NAS, `git
-clone` this repo (or copy the files over), create `secrets/steam_user.txt`
-and `secrets/steam_password.txt` (see "Steam account for the build"
-above), then:
-```
-docker build --secret id=steam_user,src=secrets/steam_user.txt \
-             --secret id=steam_password,src=secrets/steam_password.txt \
-             -t acc-dedicated-server:latest .
-```
-and point `docker-compose.yml`'s `image:` at that local tag instead of
-the GHCR one before pasting it into Container Station.
+clone` this repo (or copy the files over), then `docker build -t
+acc-dedicated-server:latest .` (no Steam credentials needed for this
+part anymore) and point `docker-compose.yml`'s `image:` at that local
+tag instead of the GHCR one before pasting it into Container Station.
+You'll still do the one-time interactive `download-server` step from
+the "Steam account" section either way - that's a runtime step, not a
+build one, so it applies regardless of how the image itself was built.
 
 ## Changing settings
 
@@ -185,8 +209,15 @@ advanced/rarely-touched league features:
   directly to the internet - put it behind a reverse proxy with TLS, or
   keep it on a VPN/LAN, since it can start/stop your server and holds
   your admin password.
-- To update the ACC server itself, rebuild the image (`docker compose
-  build --no-cache`) so SteamCMD re-runs `app_update`.
+- To update the ACC server itself (not the image/dashboard), delete
+  `<DATA_PATH>/accserver`'s contents and re-run the `download-server`
+  step (see the QNAP or first-time-setup sections) - it won't ask for a
+  Guard code again, that session is already cached.
 - Logs: the dashboard tails the last ~200 lines live; the full log is at
   `/data/logs/server.log` inside the container, i.e.
   `<DATA_PATH>/logs/server.log` on the host.
+- If you'd previously added `STEAM_USER`/`STEAM_PASSWORD` as **GitHub
+  Actions** repo secrets (from an earlier iteration of this setup), they
+  can be deleted - the build no longer uses them. They're only needed as
+  regular deployment config now (`.env` / the pasted `docker-compose.yml`
+  on the NAS), for the runtime download in `entrypoint.sh`.

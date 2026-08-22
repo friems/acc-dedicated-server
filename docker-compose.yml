@@ -1,13 +1,6 @@
 services:
   acc-server:
-    build:
-      context: .
-      # Only consulted if you actually build locally (`docker compose build`
-      # / `up --build`) - see README for creating these files. Irrelevant if
-      # you just `docker compose pull` the GHCR image below.
-      secrets:
-        - steam_user
-        - steam_password
+    build: .
     image: ghcr.io/friems/acc-dedicated-server:latest
     container_name: acc-server
     restart: unless-stopped
@@ -21,6 +14,12 @@ services:
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-changeme}
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-please-change-this-secret}
       AUTO_START: ${AUTO_START:-true}
+
+      # a real (free/disposable is fine) Steam account, used only to download
+      # the ACC dedicated server on first start - see README's "Steam
+      # account" section. No default: required.
+      STEAM_USER: ${STEAM_USER:?set STEAM_USER - see README}
+      STEAM_PASSWORD: ${STEAM_PASSWORD:?set STEAM_PASSWORD - see README}
 
       # seeds cfg/*.json ONLY the first time the volume is empty - after
       # that, edit everything from the dashboard instead.
@@ -41,9 +40,3 @@ services:
       WEATHER_RANDOMNESS: ${WEATHER_RANDOMNESS:-1}
     volumes:
       - ${DATA_PATH:?set DATA_PATH to a real host path before starting this stack - see README}:/data
-
-secrets:
-  steam_user:
-    file: ./secrets/steam_user.txt
-  steam_password:
-    file: ./secrets/steam_password.txt

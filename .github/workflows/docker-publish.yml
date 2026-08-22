@@ -38,6 +38,3 @@ jobs:
             ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          secrets: |
-            steam_user=${{ secrets.STEAM_USER }}
-            steam_password=${{ secrets.STEAM_PASSWORD }}

@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -7,9 +6,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     WINEDEBUG=-all \
     WINEDLLOVERRIDES=mscoree=d;mshtml=d \
     STEAMCMDDIR=/opt/steamcmd \
-    ACC_INSTALL_DIR=/opt/accserver \
+    ACC_INSTALL_DIR=/data/accserver \
     ACC_DATA_DIR=/data \
-    ACC_CFG_DIR=/data/cfg
+    ACC_CFG_DIR=/data/cfg \
+    STEAM_HOME=/data/.steam_home
 
 # --- OS deps: wine (via WineHQ, for a known-good 64-bit build) + steamcmd's
 # 32-bit runtime deps + python for the dashboard --------------------------
@@ -32,29 +32,16 @@ RUN dpkg --add-architecture i386 && \
 RUN wineboot --init && wineserver --wait
 
 # --- SteamCMD ---------------------------------------------------------------
+# Just the tool itself - no credentials needed for this part. The actual ACC
+# server download happens at container start (entrypoint.sh), against the
+# persistent /data volume, because it needs a real (if free/disposable) Steam
+# account, and that account's first-ever login needs a one-time interactive
+# Steam Guard email code that no CI/build environment can answer. Doing the
+# download at runtime means that one-time step happens once on the real host
+# and is then remembered forever via /data, instead of on every CI build.
 RUN mkdir -p ${STEAMCMDDIR} && \
     curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" \
         | tar zxvf - -C ${STEAMCMDDIR}
-
-# --- ACC dedicated server (Steam app 1430110) --------------------------------
-# The dedicated server is a Windows-only depot, so the platform must be
-# forced to windows since the container's native platform is linux.
-#
-# Anonymous SteamCMD login does NOT work for this app (confirmed: it fails
-# with "Missing configuration", and CubeCoders' AMP template for this game
-# explicitly sets SteamUpdateAnonymousLogin=False) - it needs a real Steam
-# account, though a free/disposable one with Steam Guard disabled is fine.
-# Credentials are passed as BuildKit secrets so they never land in an image
-# layer or in `docker history`.
-RUN --mount=type=secret,id=steam_user,required=true \
-    --mount=type=secret,id=steam_password,required=true \
-    mkdir -p ${ACC_INSTALL_DIR} && \
-    ${STEAMCMDDIR}/steamcmd.sh \
-        +@sSteamCmdForcePlatformType windows \
-        +force_install_dir ${ACC_INSTALL_DIR} \
-        +login "$(cat /run/secrets/steam_user)" "$(cat /run/secrets/steam_password)" \
-        +app_update 1430110 validate \
-        +quit
 
 # --- dashboard app ------------------------------------------------------------
 WORKDIR /app
