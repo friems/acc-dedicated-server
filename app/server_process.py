@@ -40,6 +40,10 @@ def _link_dir(target_name, bin_dir, real_dir):
     server and the dashboard always read/write the exact same files."""
     os.makedirs(real_dir, exist_ok=True)
     link_path = os.path.join(bin_dir, target_name)
+    if os.path.abspath(link_path) == os.path.abspath(real_dir):
+        # bin_dir IS the data dir (both mounted from the same host path) -
+        # they're already the same directory, nothing to link.
+        return
     if os.path.islink(link_path):
         if os.readlink(link_path) == real_dir:
             return
