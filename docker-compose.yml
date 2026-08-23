@@ -15,11 +15,13 @@ services:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-please-change-this-secret}
       AUTO_START: ${AUTO_START:-true}
 
-      # a real (free/disposable is fine) Steam account, used only to download
-      # the ACC dedicated server on first start - see README's "Steam
-      # account" section. No default: required.
-      STEAM_USER: ${STEAM_USER:?set STEAM_USER - see README}
-      STEAM_PASSWORD: ${STEAM_PASSWORD:?set STEAM_PASSWORD - see README}
+      # OPTIONAL fallback: a real (free/disposable is fine) Steam account,
+      # used only if you want the container to download the ACC dedicated
+      # server itself via SteamCMD instead of feeding in pre-downloaded
+      # files via ACC_SERVER_PATH below - see README's "Steam account"
+      # section. Leave both unset if you're using ACC_SERVER_PATH.
+      STEAM_USER: ${STEAM_USER:-}
+      STEAM_PASSWORD: ${STEAM_PASSWORD:-}
 
       # seeds cfg/*.json ONLY the first time the volume is empty - after
       # that, edit everything from the dashboard instead.
@@ -40,3 +42,7 @@ services:
       WEATHER_RANDOMNESS: ${WEATHER_RANDOMNESS:-1}
     volumes:
       - ${DATA_PATH:?set DATA_PATH to a real host path before starting this stack - see README}:/data
+      # pre-downloaded ACC dedicated server files (accServer.exe etc, e.g.
+      # from a separate NAS share), mounted straight into the install dir -
+      # see README's "Providing the server files" section.
+      - ${ACC_SERVER_PATH:?set ACC_SERVER_PATH to the folder containing your pre-downloaded ACC dedicated server files - see README}:/data/accserver

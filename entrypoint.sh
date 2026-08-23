@@ -10,22 +10,29 @@ server_present() {
   find "$ACC_INSTALL_DIR" -iname accServer.exe 2>/dev/null | grep -q .
 }
 
-# Downloads the ACC dedicated server via SteamCMD into the persistent
-# /data volume. The FIRST time this specific Steam account logs in from
-# this container, Steam emails a Guard code and steamcmd blocks waiting
-# for it on stdin - that only works with an interactive terminal attached
-# (`docker compose run --rm -it acc-server download-server`). Once that
-# one-time login succeeds, its session is cached under $STEAM_HOME (which
-# lives on the persistent volume), so every run after that - including
-# normal, non-interactive container starts - just works.
+# Preferred path: mount pre-downloaded server files (accServer.exe etc)
+# via ACC_SERVER_PATH -> /data/accserver (see docker-compose.yml / README's
+# "Providing the server files" section) - server_present() below finds
+# them and this function is never needed.
+#
+# Fallback path: downloads the ACC dedicated server via SteamCMD into the
+# persistent /data volume. The FIRST time this specific Steam account logs
+# in from this container, Steam emails a Guard code and steamcmd blocks
+# waiting for it on stdin - that only works with an interactive terminal
+# attached (`docker compose run --rm -it acc-server download-server`). Once
+# that one-time login succeeds, its session is cached under $STEAM_HOME
+# (which lives on the persistent volume), so every run after that -
+# including normal, non-interactive container starts - just works.
 download_server() {
   if server_present; then
     echo "ACC server already present in ${ACC_INSTALL_DIR} - skipping download."
     return 0
   fi
   if [ -z "${STEAM_USER:-}" ] || [ -z "${STEAM_PASSWORD:-}" ]; then
-    echo "ERROR: STEAM_USER / STEAM_PASSWORD are not set - cannot download the ACC dedicated server." >&2
-    echo "Set them (see README's 'Steam account' section) and run:" >&2
+    echo "ERROR: no ACC server found in ${ACC_INSTALL_DIR}, and STEAM_USER / STEAM_PASSWORD are not set." >&2
+    echo "Either mount pre-downloaded server files via ACC_SERVER_PATH (see README's" >&2
+    echo "'Providing the server files' section), or set STEAM_USER/STEAM_PASSWORD (see" >&2
+    echo "README's 'Steam account' section) and run:" >&2
     echo "  docker compose run --rm -it acc-server download-server" >&2
     return 1
   fi

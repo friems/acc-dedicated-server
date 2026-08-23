@@ -15,19 +15,58 @@ rules - without touching JSON by hand.
   that runs in the foreground. It reads/writes ACC's `cfg/*.json` files
   (UTF-16LE + BOM, as ACC requires) and starts/stops `wine accServer.exe`
   as a child process.
-- `entrypoint.sh` - on container start: downloads the ACC dedicated
-  server via SteamCMD into `/data/accserver` if it isn't there yet,
-  ensures `/data/cfg` has default config (only if missing), optionally
+- `entrypoint.sh` - on container start: looks for the ACC dedicated
+  server under `/data/accserver` (normally supplied via the
+  `ACC_SERVER_PATH` mount, see below); if it's genuinely missing, falls
+  back to downloading it via SteamCMD; either way it then ensures
+  `/data/cfg` has default config (only if missing), optionally
   auto-starts the game server, then starts the dashboard.
-- Everything persistent - `cfg/`, `results/`, `logs/`, the ACC server
-  install itself, and SteamCMD's login session - lives in `/data`. That
-  last part matters: it's what makes the one-time Steam login below a
-  true one-time thing instead of something you redo on every rebuild.
+- Everything persistent - `cfg/`, `results/`, `logs/`, and (if you use
+  the SteamCMD fallback) its login session - lives in `/data`. The ACC
+  server install itself lives separately, under whatever host path you
+  point `ACC_SERVER_PATH` at.
 
-## Steam account (needed to download the server)
+## Providing the server files (recommended)
 
-Downloading the ACC dedicated server needs a real Steam account - a
-free, disposable one is fine, it never needs to own or launch anything.
+The ACC dedicated server binaries don't need to be downloaded by the
+container at all - you can fetch them once, anywhere you like (another
+PC, the NAS itself over SSH, a VM), and just point the container at that
+folder. This sidesteps SteamCMD's interactive Steam Guard step entirely
+inside the container, which is what used to make Container Station's
+non-interactive first start fail.
+
+1. On any machine with `steamcmd` installed (a free/disposable Steam
+   account is fine - anonymous login does **not** work for this specific
+   app, confirmed, it fails with "Missing configuration"), run:
+   ```
+   steamcmd +@sSteamCmdForcePlatformType windows \
+     +force_install_dir /path/to/ACCServerFiles \
+     +login YOUR_STEAM_USER YOUR_STEAM_PASSWORD \
+     +app_update 1430110 validate \
+     +quit
+   ```
+   The very first login from a new device may prompt for a one-time
+   Steam Guard email code - steamcmd waits for it on stdin, so run this
+   interactively the first time. This is a one-off step on whatever
+   machine you use to fetch the files; it has nothing to do with the
+   container.
+2. Copy/rsync the resulting `ACCServerFiles` folder (it should contain
+   `accServer.exe`) onto the NAS share you want the container to read
+   from, e.g. `/share/ACCServerFiles`.
+3. Set `ACC_SERVER_PATH` (in `.env`, or directly in the pasted YAML for
+   the QNAP GUI) to that folder - there's no default, it's required. The
+   container bind-mounts it straight to `/data/accserver`.
+4. To update the server later (new ACC patch), just re-run the same
+   `steamcmd ... +app_update 1430110 validate +quit` command against the
+   same folder, no container changes needed - `entrypoint.sh` finds
+   whatever's there on the next start.
+
+## Steam account (optional fallback - only if you skip the above)
+
+If you'd rather have the *container* download the server itself instead
+of feeding it in via `ACC_SERVER_PATH`, set `STEAM_USER` / `STEAM_PASSWORD`
+wherever you set the rest of this project's settings (`.env`, or directly
+in the pasted YAML for the QNAP GUI) - both default to blank/unused.
 Anonymous SteamCMD login does **not** work for this specific app
 (confirmed - it fails with "Missing configuration"; CubeCoders' AMP
 template for this game explicitly sets `SteamUpdateAnonymousLogin=False`
@@ -35,10 +74,6 @@ too). Create one at store.steampowered.com, then go to **Account
 Details > Manage Steam Guard account security > Steam Guard is turned
 off** (fully off, not just the mobile authenticator - otherwise routine
 logins would keep demanding a 2FA code).
-
-Set `STEAM_USER` / `STEAM_PASSWORD` wherever you set the rest of this
-project's settings (`.env`, or directly in the pasted YAML for the QNAP
-GUI) - there's no default, it's required.
 
 **Even with Steam Guard off, the very first login from a brand-new
 "device" (i.e. this container, the first time it ever runs) still gets a
@@ -52,7 +87,10 @@ docker compose run --rm -it acc-server download-server
 If Steam emails a code, paste it in when steamcmd asks. That session is
 then cached under `/data/.steam_home` (on your persistent volume), so
 every normal start after that - `docker compose up -d`, a NAS reboot, a
-Container Station restart - just works with no further prompts.
+Container Station restart - just works with no further prompts. This is
+exactly the interactive-login problem `ACC_SERVER_PATH` above avoids -
+prefer that route on a NAS/Container Station where you can't easily
+attach an interactive terminal.
 Don't paste your Steam credentials into chat with me - they only belong
 in your own `.env`/deployment config.
 
@@ -62,23 +100,19 @@ in your own `.env`/deployment config.
    ```
    cp env.example .env
    ```
-   At minimum, set `DATA_PATH`, `STEAM_USER`, and `STEAM_PASSWORD`
-   (none have defaults, on purpose - see above), and change
-   `DASHBOARD_PASSWORD`, `ADMIN_PASSWORD`, and `FLASK_SECRET_KEY`. The
-   rest (`SERVER_NAME`, `TRACK`, `CAR_GROUP`, ports, weather, ...) only
-   seed the config the very first time the server starts (empty volume)
-   - after that, use the dashboard.
+   At minimum, set `DATA_PATH` and `ACC_SERVER_PATH` (see "Providing the
+   server files" above - neither has a default, on purpose), and change
+   `DASHBOARD_PASSWORD`, `ADMIN_PASSWORD`, and `FLASK_SECRET_KEY`. Leave
+   `STEAM_USER`/`STEAM_PASSWORD` blank unless you're using the SteamCMD
+   fallback instead. The rest (`SERVER_NAME`, `TRACK`, `CAR_GROUP`, ports,
+   weather, ...) only seed the config the very first time the server
+   starts (empty volume) - after that, use the dashboard.
 
-2. Create the directory you chose for `DATA_PATH`, build, and do the
-   one-time interactive download:
+2. Create the `DATA_PATH` directory, populate `ACC_SERVER_PATH` (see
+   "Providing the server files" above), build, and start:
    ```
    mkdir -p /path/to/your/data-dir   # whatever you set DATA_PATH to
    docker compose build
-   docker compose run --rm -it acc-server download-server
-   ```
-   Watch for a Steam Guard code prompt (see "Steam account" above) and
-   enter it if asked. Once that finishes successfully:
-   ```
    docker compose up -d
    ```
 
@@ -116,39 +150,44 @@ it directly. No SSH, no local build, on the NAS at all.
    it's visible/backupable from the NAS UI. There's no default folder
    baked into `docker-compose.yml`; you choose the path in the next step.
 
-3. **In Container Station's web UI**: Applications > Create > paste the
+3. **Populate a server-files folder** per "Providing the server files"
+   above - run `steamcmd` on any machine you like (doesn't have to be the
+   NAS), then copy the resulting folder onto a NAS share, e.g. File
+   Station's `/share/ACCServerFiles`.
+
+4. **In Container Station's web UI**: Applications > Create > paste the
    contents of `docker-compose.yml` as-is (it already points at the GHCR
    image). Since the GUI won't read `.env`, edit values *directly in the
    pasted YAML* before creating the app:
    - `${DATA_PATH:?...}` - required, no default. Replace the whole
      `${DATA_PATH:?...}` expression with the literal path you created in
      step 2, e.g. `/share/Container/acc-server`.
-   - `${STEAM_USER:?...}` / `${STEAM_PASSWORD:?...}` - required, no
-     default. Replace with your disposable Steam account's credentials
-     (see "Steam account" above).
+   - `${ACC_SERVER_PATH:?...}` - required, no default. Replace the whole
+     expression with the literal path from step 3, e.g.
+     `/share/ACCServerFiles`.
+   - `${STEAM_USER:-}` / `${STEAM_PASSWORD:-}` - leave as-is (blank) if
+     you're providing server files via `ACC_SERVER_PATH`; only fill these
+     in if you want the SteamCMD fallback instead (see "Steam account"
+     above) - note that route needs an interactive Guard-code step below
+     that `ACC_SERVER_PATH` avoids entirely.
    - `DASHBOARD_PASSWORD`, `ADMIN_PASSWORD`, `FLASK_SECRET_KEY` - replace
      e.g. `${DASHBOARD_PASSWORD:-changeme}` with
      `${DASHBOARD_PASSWORD:-YourRealPassword}`, or just the literal
      value.
 
-4. Start the application from Container Station. On this first start,
-   `entrypoint.sh` will try the ACC server download and - almost
-   certainly - fail, because Container Station starts it non-interactively
-   and the very first Steam login needs that one-time interactive Guard
-   code (see "Steam account" above). That's expected; the dashboard will
-   still come up. Now do the one-time interactive step: over SSH,
-   ```
-   docker exec -it acc-server /entrypoint.sh download-server
-   ```
-   (or check whether your Container Station version has a per-container
-   **Terminal/Console** tab in the container's detail view - if so, you
-   can run that same command from there instead of SSH). Enter the Guard
-   code if Steam emails you one.
-
-5. Once that succeeds, restart the application from Container Station so
-   `entrypoint.sh` finds the now-downloaded server and starts it. Open
+5. Start the application from Container Station. `entrypoint.sh` finds
+   `accServer.exe` under the `ACC_SERVER_PATH` mount immediately, so no
+   further interactive step is needed - it should come straight up. Open
    `http://<nas-ip>:8080`, log in, and check the log panel to confirm
    `accServer.exe` actually came up under Wine.
+
+   (If you went with the SteamCMD fallback instead of `ACC_SERVER_PATH`,
+   this first start will fail to download non-interactively - that's
+   expected; the dashboard still comes up. Do the one-time interactive
+   step over SSH: `docker exec -it acc-server /entrypoint.sh
+   download-server` (or your Container Station version's per-container
+   **Terminal/Console** tab, if it has one), enter the Guard code if
+   Steam emails you one, then restart the application.)
 
 6. Forward TCP+UDP `9231` (or whatever you set) on your router, pointing
    at the NAS's IP.
@@ -157,12 +196,12 @@ it directly. No SSH, no local build, on the NAS at all.
 workflow manually from the Actions tab), wait for it to publish a new
 `:latest`, then in Container Station either restart the application (if
 it's set to always pull) or remove/recreate it to force a fresh pull -
-your `/data` (config, Steam login, the ACC server itself) is untouched
-either way. **Updating the ACC server version itself** needs its
-contents refreshed: delete `<DATA_PATH>/accserver`'s contents via File
-Station, then repeat the interactive `download-server` step above (no
-new Guard code needed - that session is still cached in
-`<DATA_PATH>/.steam_home`).
+your `/data` (config, and Steam login if you use the SteamCMD fallback)
+and your `ACC_SERVER_PATH` folder are untouched either way. **Updating
+the ACC server version itself**: re-run the `steamcmd ...
++app_update 1430110 validate +quit` command from "Providing the server
+files" against your `ACC_SERVER_PATH` folder, then restart the
+application so `entrypoint.sh` picks up the refreshed files.
 
 **Resource note**: ACC's dedicated server itself is lightweight (it's a
 headless simulation, not rendering anything), so a small/private server
@@ -177,9 +216,10 @@ clone` this repo (or copy the files over), then `docker build -t
 acc-dedicated-server:latest .` (no Steam credentials needed for this
 part anymore) and point `docker-compose.yml`'s `image:` at that local
 tag instead of the GHCR one before pasting it into Container Station.
-You'll still do the one-time interactive `download-server` step from
-the "Steam account" section either way - that's a runtime step, not a
-build one, so it applies regardless of how the image itself was built.
+You'll still need `ACC_SERVER_PATH` pointed at a populated server-files
+folder (or the interactive `download-server` fallback) either way -
+that's a runtime concern, not a build one, so it applies regardless of
+how the image itself was built.
 
 ## Changing settings
 
@@ -209,10 +249,10 @@ advanced/rarely-touched league features:
   directly to the internet - put it behind a reverse proxy with TLS, or
   keep it on a VPN/LAN, since it can start/stop your server and holds
   your admin password.
-- To update the ACC server itself (not the image/dashboard), delete
-  `<DATA_PATH>/accserver`'s contents and re-run the `download-server`
-  step (see the QNAP or first-time-setup sections) - it won't ask for a
-  Guard code again, that session is already cached.
+- To update the ACC server itself (not the image/dashboard), re-run the
+  `steamcmd ... +app_update 1430110 validate +quit` command from
+  "Providing the server files" against your `ACC_SERVER_PATH` folder and
+  restart the container - no in-container step needed.
 - Logs: the dashboard tails the last ~200 lines live; the full log is at
   `/data/logs/server.log` inside the container, i.e.
   `<DATA_PATH>/logs/server.log` on the host.
@@ -220,4 +260,5 @@ advanced/rarely-touched league features:
   Actions** repo secrets (from an earlier iteration of this setup), they
   can be deleted - the build no longer uses them. They're only needed as
   regular deployment config now (`.env` / the pasted `docker-compose.yml`
-  on the NAS), for the runtime download in `entrypoint.sh`.
+  on the NAS), and only if you're using the SteamCMD fallback instead of
+  `ACC_SERVER_PATH`.
