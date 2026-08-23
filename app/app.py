@@ -184,4 +184,4 @@ def api_log():
 if __name__ == "__main__":
     cfg.ensure_defaults()
     from waitress import serve
-    serve(app, host="0.0.0.0", port=8080)
+    serve(app, host="0.0.0.0", port=int(os.environ.get("DASHBOARD_PORT", 8080)))

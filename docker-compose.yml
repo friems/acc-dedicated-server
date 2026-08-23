@@ -4,24 +4,21 @@ services:
     image: ghcr.io/friems/acc-dedicated-server:latest
     container_name: acc-server
     restart: unless-stopped
-    ports:
-      - "${DASHBOARD_PORT:-8080}:8080"
-      - "${TCP_PORT:-9232}:${TCP_PORT:-9232}/tcp"
-      - "${UDP_PORT:-9231}:${UDP_PORT:-9231}/udp"
+    mac_address: ${ACC_MAC_ADDRESS:?set ACC_MAC_ADDRESS to a fixed MAC address for this container - see README's "Network" section}
+    networks:
+      acc-lan: {}
     environment:
       # dashboard login
       DASHBOARD_USER: ${DASHBOARD_USER:-admin}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-changeme}
-      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-H02XcNwfpK63LIUDnJ7LY74Jhuazjg2NZm7x8pUH}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-please-change-this-secret}
       AUTO_START: ${AUTO_START:-true}
 
-      # OPTIONAL fallback: a real (free/disposable is fine) Steam account,
-      # used only if you want the container to download the ACC dedicated
-      # server itself via SteamCMD instead of feeding in pre-downloaded
-      # files via ACC_SERVER_PATH below - see README's "Steam account"
-      # section. Leave both unset if you're using ACC_SERVER_PATH.
-      # STEAM_USER: ${STEAM_USER:-}
-      # STEAM_PASSWORD: ${STEAM_PASSWORD:-}
+      # port the dashboard itself listens on. The container gets its own LAN
+      # IP (see README's "Network" section) rather than being NAT/port-
+      # published, so this IS the port you browse to - there's no separate
+      # host-side mapping.
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-8080}
 
       # seeds cfg/*.json ONLY the first time the volume is empty - after
       # that, edit everything from the dashboard instead.
@@ -46,3 +43,12 @@ services:
       # from a separate NAS share), mounted straight into the install dir -
       # see README's "Providing the server files" section.
       - ${ACC_SERVER_PATH:?set ACC_SERVER_PATH to the folder containing your pre-downloaded ACC dedicated server files - see README}:/data/accserver
+
+networks:
+  # the container is attached directly to this pre-existing bridged network
+  # (e.g. a QNAP Container Station virtual switch) so it gets its own real
+  # LAN IP via DHCP, instead of going through docker's default NAT +
+  # port-publishing - see README's "Network" section for why.
+  acc-lan:
+    external: true
+    name: ${ACC_NETWORK_NAME:?set ACC_NETWORK_NAME to your pre-existing bridged/macvlan-style docker network name - see README}
