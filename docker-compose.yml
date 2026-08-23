@@ -6,13 +6,13 @@ services:
     restart: unless-stopped
     ports:
       - "${DASHBOARD_PORT:-8080}:8080"
-      - "${TCP_PORT:-9231}:${TCP_PORT:-9231}/tcp"
+      - "${TCP_PORT:-9232}:${TCP_PORT:-9232}/tcp"
       - "${UDP_PORT:-9231}:${UDP_PORT:-9231}/udp"
     environment:
       # dashboard login
       DASHBOARD_USER: ${DASHBOARD_USER:-admin}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-changeme}
-      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-please-change-this-secret}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-H02XcNwfpK63LIUDnJ7LY74Jhuazjg2NZm7x8pUH}
       AUTO_START: ${AUTO_START:-true}
 
       # OPTIONAL fallback: a real (free/disposable is fine) Steam account,
@@ -20,8 +20,8 @@ services:
       # server itself via SteamCMD instead of feeding in pre-downloaded
       # files via ACC_SERVER_PATH below - see README's "Steam account"
       # section. Leave both unset if you're using ACC_SERVER_PATH.
-      STEAM_USER: ${STEAM_USER:-}
-      STEAM_PASSWORD: ${STEAM_PASSWORD:-}
+      # STEAM_USER: ${STEAM_USER:-}
+      # STEAM_PASSWORD: ${STEAM_PASSWORD:-}
 
       # seeds cfg/*.json ONLY the first time the volume is empty - after
       # that, edit everything from the dashboard instead.
@@ -32,7 +32,7 @@ services:
       CAR_GROUP: ${CAR_GROUP:-FreeForAll}
       MAX_CAR_SLOTS: ${MAX_CAR_SLOTS:-26}
       MAX_CONNECTIONS: ${MAX_CONNECTIONS:-30}
-      TCP_PORT: ${TCP_PORT:-9231}
+      TCP_PORT: ${TCP_PORT:-9232}
       UDP_PORT: ${UDP_PORT:-9231}
       REGISTER_TO_LOBBY: ${REGISTER_TO_LOBBY:-true}
       TRACK: ${TRACK:-monza}
